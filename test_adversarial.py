@@ -138,26 +138,37 @@ def test_tool_failure():
 # ──────────────────────────────────────────────────────────────────
 #  TEST 4: Infinite Loop / Max Iterations
 #  Proves: the iteration guardrail stops runaway loops
+#  Note: Uses varied tool args so the duplicate detector doesn't
+#        short-circuit first — we want to hit the real iteration cap.
 # ──────────────────────────────────────────────────────────────────
 def test_infinite_loop():
-    # Line 101:  Create an LM that ALWAYS calls a tool (never produces a final answer).
+    # Line 101:  Create an LM that ALWAYS calls a tool with a UNIQUE key each time.
     class InfiniteToolLM(SimulatedLM):
-        # Line 103:  Every generate() call returns a tool call, creating an infinite loop.
-        def generate(self, prompt: str, context: str = "") -> str:
-            # Line 105:  Always request to store something (valid tool, so it "succeeds").
-            return "TOOL_CALL: memory_store(key=loop, value=again)"
+        # Line 103:  Track call count to generate unique args per iteration.
+        def __init__(self):
+            # Line 105:  Call parent constructor.
+            super().__init__(name="InfiniteLM")
+            # Line 106:  Counter ensures each tool call is different (bypasses dup detector).
+            self._n = 0
 
-    # Line 107:  Create a RAG pipeline for this test.
+        # Line 108:  Each generate() returns a valid tool call with a unique key.
+        def generate(self, prompt: str, context: str = "") -> str:
+            # Line 110:  Increment counter to make this call unique.
+            self._n += 1
+            # Line 111:  Return a memory_store call with a different key each time.
+            return f"TOOL_CALL: memory_store(key=iter_{self._n}, value=x)"
+
+    # Line 113:  Create a RAG pipeline for this test.
     rag = RAGPipeline()
-    # Line 108:  Create the agent with the infinite-loop LM.
+    # Line 114:  Create the agent with the infinite-loop LM (varied args).
     agent = Agent(lm=InfiniteToolLM(), rag_pipeline=rag)
 
-    # Line 110:  Run a query — the agent should hit max_iterations and stop.
+    # Line 116:  Run a query — the agent should hit max_iterations and stop.
     result = agent.run("start the loop")
-    # Line 111:  Assert the result indicates a timeout/stop (not an infinite hang).
+    # Line 117:  Assert the result indicates a timeout (iteration cap was reached).
     assert "[TIMEOUT]" in result, f"Expected TIMEOUT message, got: {result[:80]}"
 
-    # Line 113:  Verify the iteration count matches our max (proves the guard worked).
+    # Line 119:  Verify the iteration count equals our max (proves the guard fired at exactly the right time).
     assert (
         agent.guardrails.iteration_count == agent.guardrails.max_iterations
     ), f"Iteration count {agent.guardrails.iteration_count} != max {agent.guardrails.max_iterations}"

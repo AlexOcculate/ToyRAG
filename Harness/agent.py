@@ -63,81 +63,111 @@ class Agent:
         conversation = user_input
         # Line 39:  Track citations collected during this turn for final output.
         citations: list[str] = []
+        # Line 40:  Track the last tool call emitted to detect duplicate/stuck loops.
+        last_tool_call: str = ""
 
-        # Line 41:  Begin the main agent loop (bounded by guardrails).
+        # Line 42:  Begin the main agent loop (bounded by guardrails).
         while True:
-            # Line 43:  Check if we've exceeded the iteration budget.
+            # Line 44:  Check if we've exceeded the iteration budget.
             if not self.guardrails.check_iterations():
-                # Line 45:  Log that we hit the max iterations and are stopping.
+                # Line 46:  Log that we hit the max iterations and are stopping.
                 self.trace.log(
                     "guardrails",
                     f"STOPPED: Max iterations ({self.guardrails.max_iterations}) reached.",
                 )
-                # Line 46:  Return a timeout message to the user.
+                # Line 47:  Return a timeout message to the user.
                 return "[TIMEOUT] Agent exceeded maximum iterations."
 
             # ─── RAG Step: Retrieve relevant documents ──────────────────
-            # Line 49:  Call the RAG pipeline to retrieve docs and build augmented prompt.
+            # Line 50:  Call the RAG pipeline to retrieve docs and build augmented prompt.
             augmented_prompt, retrieved_docs = self.rag.retrieve_and_augment(
                 conversation
             )
-            # Line 50:  Log which documents were retrieved (magenta for RAG component).
+            # Line 51:  Log which documents were retrieved (magenta for RAG component).
             doc_names = [d["id"] for d in retrieved_docs]
-            # Line 51:  Record the retrieval step in the trace.
+            # Line 52:  Record the retrieval step in the trace.
             self.trace.log("rag", f"RETRIEVED {len(retrieved_docs)} docs: {doc_names}")
 
             # ─── LM Step: Generate response with augmented context ──────
-            # Line 54:  Build the full prompt for the LM (user query + tool descriptions).
+            # Line 55:  Build the full prompt for the LM (user query + tool descriptions).
             prompt = self._build_prompt(conversation)
-            # Line 55:  Call the LM with the prompt and the retrieved context.
+            # Line 56:  Call the LM with the prompt and the retrieved context.
             response = self.lm.generate(prompt, context=augmented_prompt)
-            # Line 56:  Log the raw LM output (cyan for LM component).
+            # Line 57:  Log the raw LM output (cyan for LM component).
             self.trace.log(
                 "lm",
                 f"RESPONSE: {response[:120]}{'...' if len(response) > 120 else ''}",
             )
 
             # ─── Parse Step: Determine if this is a tool call or final answer ──
-            # Line 59:  Check if the LM output starts with "TOOL_CALL:" prefix.
+            # Line 60:  Check if the LM output starts with "TOOL_CALL:" prefix.
             if response.startswith("TOOL_CALL:"):
-                # Line 61:  Extract the tool name and arguments from the TOOL_CALL string.
+                # Line 62:  Extract the tool name and arguments from the TOOL_CALL string.
                 tool_name, args = self._parse_tool_call(response)
-                # Line 62:  Log the tool call decision (yellow for tools component).
+
+                # ─── Duplicate detection: same call twice in a row ──────
+                # Line 65:  Build a canonical string for this tool call (for comparison).
+                current_call = f"{tool_name}:{sorted(args.items())}"
+                # Line 66:  If this is identical to the previous iteration's call, we're stuck.
+                if current_call == last_tool_call and last_tool_call != "":
+                    # Line 68:  Log the stuck detection (guardrails color = red).
+                    self.trace.log(
+                        "guardrails",
+                        f"STUCK DETECTED: Same tool call repeated ({tool_name}). Breaking loop.",
+                    )
+                    # Line 69:  Return a graceful message instead of looping to max.
+                    return f"[STOPPED] Agent detected a repeated tool call ({tool_name}) and stopped."
+
+                # Line 72:  Update the last_tool_call tracker for next iteration comparison.
+                last_tool_call = current_call
+
+                # Line 74:  Log the tool call decision (yellow for tools component).
                 self.trace.log("tools", f"CALLING: {tool_name}({args})")
 
                 # ─── Execute Step: Run the tool ─────────────────────────
-                # Line 65:  Execute the tool through the registry (handles errors internally).
-                success, result = self.tools.execute(tool_name, args)
-                # Line 66:  Log the tool execution result.
+                # Line 77:  Execute the tool through the registry.
+                # Line 78:  Wrap in try/except so even a monkey-patched or crashing
+                # Line 79:  execute() method cannot kill the agent loop (defense in depth).
+                try:
+                    # Line 81:  Call the tool execution method with name and args.
+                    success, result = self.tools.execute(tool_name, args)
+                except Exception as e:
+                    # Line 83:  If execute itself raised (not just a tool handler), catch it here.
+                    success = False
+                    # Line 84:  Format the unexpected exception as a tool failure result.
+                    result = (
+                        f"UNEXPECTED ERROR in tool execution: {type(e).__name__}: {e}"
+                    )
+                # Line 86:  Log the tool execution result (works for both normal and caught errors).
                 self.trace.log(
                     "tools", f"RESULT ({'OK' if success else 'FAIL'}): {result[:80]}"
                 )
 
                 # ─── Feed tool result back into conversation ────────────
-                # Line 69:  Append the tool result to the conversation so next iteration sees it.
+                # Line 81:  Append the tool result to the conversation so next iteration sees it.
                 conversation = (
                     f"{conversation}\n[Tool result from {tool_name}]: {result}"
                 )
-                # Line 70:  Continue the loop (LM will now see the tool output).
+                # Line 82:  Continue the loop (LM will now see the tool output).
                 continue
 
             # ─── Final Answer: No tool call, so this is the response ────
-            # Line 73:  Collect citations from the retrieved documents.
+            # Line 85:  Collect citations from the retrieved documents.
             for doc in retrieved_docs:
-                # Line 75:  Add each document ID to the citations list (deduplicated).
+                # Line 87:  Add each document ID to the citations list (deduplicated).
                 if doc["id"] not in citations:
-                    # Line 77:  Append the citation source.
+                    # Line 89:  Append the citation source.
                     citations.append(doc["id"])
 
-            # Line 79:  Log that we're returning a final answer.
+            # Line 91:  Log that we're returning a final answer.
             self.trace.log("loop", f"FINAL ANSWER (citations: {citations})")
-            # Line 80:  Format and return the final answer with citations appended.
+            # Line 92:  Format and return the final answer with citations appended.
             answer = response
-            # Line 81:  If there are citations, append them as a source line.
+            # Line 93:  If there are citations, append them as a source line.
             if citations:
-                # Line 83:  Build the citation footer string.
+                # Line 95:  Build the citation footer string.
                 answer += f"\n\n[Citations: {', '.join(citations)}]"
-            # Line 84:  Return the complete grounded answer to the caller.
+            # Line 96:  Return the complete grounded answer to the caller.
             return answer
 
     # Line 87:  Build the full prompt sent to the LM (includes tool descriptions).

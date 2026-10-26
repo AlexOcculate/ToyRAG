@@ -56,10 +56,16 @@ class Guardrails:
 
     # Line 46:  Check if the agent has exceeded its iteration budget.
     def check_iterations(self) -> bool:
-        # Line 48:  Increment the iteration counter for this call.
+        # Line 48:  If we've already consumed all allowed iterations, reject immediately.
+        # Line 49:  The counter represents "iterations used so far" — a rejected attempt
+        # Line 50:  does not increment it (we didn't actually run another loop cycle).
+        if self.iteration_count >= self.max_iterations:
+            # Line 52:  Budget exhausted; return False to signal the loop should stop.
+            return False
+        # Line 54:  Budget available; consume one iteration and allow the loop to proceed.
         self.iteration_count += 1
-        # Line 49:  Return True if we are still within the allowed budget.
-        return self.iteration_count <= self.max_iterations
+        # Line 55:  Return True to signal "you may run this iteration."
+        return True
 
     # Line 52:  Reset the iteration counter (called at start of each new user turn).
     def reset_iterations(self) -> None:
