@@ -1,0 +1,10 @@
+# Line 1:  Document about databases for the RAG corpus.
+A database is an organized collection of structured data stored electronically.
+# Line 2:  Describes relational databases.
+Relational databases store data in tables with rows and columns, using SQL for queries.
+# Line 3:  Mentions ACID properties.
+Key properties include Atomicity, Consistency, Isolation, and Durability (ACID).
+# Line 4:  Describes NoSQL alternatives.
+NoSQL databases like document stores and key-value stores offer flexible schemas for unstructured data.
+# Line 5:  Notes on indexing.
+Indexes speed up read operations by creating lookup structures similar to a book's index page.

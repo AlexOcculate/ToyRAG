@@ -1,0 +1,10 @@
+# Line 1:  Document about computer networking for the RAG corpus.
+Computer networking is the interconnection of computers to share resources and exchange data.
+# Line 2:  Describes TCP/IP model.
+The TCP/IP model defines four layers: link, internet, transport, and application.
+# Line 3:  Explains TCP vs UDP.
+TCP provides reliable, ordered delivery with acknowledgments; UDP offers faster but unreliable datagram transmission.
+# Line 4:  Mentions HTTP.
+HTTP is an application-layer protocol that uses request-response messages over TCP port 80 or 443.
+# Line 5:  Notes on DNS.
+DNS translates human-readable domain names into IP addresses using a distributed hierarchical system.
